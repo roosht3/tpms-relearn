@@ -1,5 +1,7 @@
 import asyncio
+import contextlib
 import json
+import threading
 import time
 from pathlib import Path
 
@@ -38,16 +40,62 @@ def select_characteristics(services, write_uuid=None, notify_uuid=None):
     return writes[0], notifies[0]
 
 
+async def ble_elm(client, write_char, notify_char, transcript):
+    """Bluetooth LE adapters: write to one GATT characteristic, replies arrive as notifications."""
+    async def send(data):
+        # 20-byte chunks also work with adapters advertising small MTUs.
+        for start in range(0, len(data), 20):
+            await client.write_gatt_char(write_char, data[start:start + 20], response="write" in write_char.properties)
+
+    elm = Elm(send, transcript)
+    await client.start_notify(notify_char, lambda _, data: elm.receive(data))
+    return elm
+
+
+@contextlib.asynccontextmanager
+async def serial_elm(port, transcript, baudrate=38400):
+    """Classic Bluetooth (paired, shows up as a serial port) and USB adapters.
+
+    `port` is a port name such as COM5 or /dev/cu.OBDII, or an open serial-like object.
+    """
+    if isinstance(port, str):
+        import serial
+        connection = serial.Serial(port, baudrate, timeout=0.1)
+    else:
+        connection = port
+    loop = asyncio.get_running_loop()
+    stop = threading.Event()
+    elm = Elm(lambda data: asyncio.to_thread(connection.write, data), transcript)
+
+    def reader():
+        # A lost connection ends the reader; the pending command then times out.
+        with contextlib.suppress(OSError):
+            while not stop.is_set():
+                data = connection.read(connection.in_waiting or 1)
+                if data:
+                    loop.call_soon_threadsafe(elm.receive, data)
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+    try:
+        yield elm
+    finally:
+        stop.set()
+        thread.join(1)
+        connection.close()
+
+
 class Elm:
-    def __init__(self, client, write_char, notify_char, transcript):
-        self.client, self.write_char, self.notify_char = client, write_char, notify_char
+    """ELM327 command channel over any byte transport: `send` writes, `receive` feeds replies."""
+    def __init__(self, send, transcript):
+        self.send = send
         self.transcript = transcript
         self.queue = asyncio.Queue()
         self.lock = asyncio.Lock()
         self.broken = False
 
-    async def start(self):
-        await self.client.start_notify(self.notify_char, lambda _, data: self.queue.put_nowait(bytes(data)))
+    def receive(self, data):
+        self.queue.put_nowait(bytes(data))
 
     async def command(self, command, timeout=8):
         async with self.lock:
@@ -59,10 +107,7 @@ class Elm:
             response = bytearray()
             try:
                 async with asyncio.timeout(timeout):
-                    data = (command + "\r").encode("ascii")
-                    # 20-byte chunks also work with adapters advertising small MTUs.
-                    for start in range(0, len(data), 20):
-                        await self.client.write_gatt_char(self.write_char, data[start:start + 20], response="write" in self.write_char.properties)
+                    await self.send((command + "\r").encode("ascii"))
                     while b">" not in response:
                         response.extend(await self.queue.get())
                         if len(response) > 65536:

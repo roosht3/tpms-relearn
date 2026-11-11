@@ -7,6 +7,7 @@ What `tpms-relearn` sends and what the car answers. Observed on a 2023 Toyota C-
 | | |
 |---|---|
 | BLE service | `FFF0` (write `FFF2`, notify `FFF1`) |
+| Classic Bluetooth / USB | serial port, 38400 baud (Bluetooth serial ports ignore the speed) |
 | CAN | 500 kbit/s, 11-bit IDs (`ATSP6`) |
 | Request ID | `750`, extended address `2A` |
 | Response ID | `758`, extended address `2A` |

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Classic Bluetooth and USB adapters: connect with `--port` (COM5, /dev/cu.OBDII, /dev/rfcomm0). `scan` now lists serial ports too (#1)
 - Windows support: install instructions, Bluetooth address help, and Windows in the test workflow
 - Simpler install for everyone: `pip install` from GitHub, no git needed
 

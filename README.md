@@ -14,7 +14,7 @@ New wheels or new sensors? The car will show the TPMS warning light until it lea
 ## What you need
 
 - A **Toyota** with a direct TPMS (sensors inside the wheels). Tested so far: C-HR 2023. See [Compatibility](#compatibility).
-- A **Bluetooth Low Energy ELM327 adapter**. Tested: [Veepeak OBDCheck BLE](https://veepeak.com/products/obdcheck-ble)
+- An **ELM327 OBD adapter**: Bluetooth LE, classic Bluetooth, or USB. Tested: [Veepeak OBDCheck BLE](https://veepeak.com/products/obdcheck-ble). Not sure which kind yours is? See [step 1](#1-find-your-adapter).
 - A **computer with Bluetooth**: a Mac or a Windows 10/11 PC (Linux should work too).
 - **Python 3.11 or newer**: [python.org/downloads](https://www.python.org/downloads/)
 - The **IDs of your new sensors**. They are printed on the sensor or its box, usually 7 or 8 hexadecimal characters such as `5D10A01`.
@@ -72,17 +72,29 @@ Same as macOS. Your user may need permission to use Bluetooth (BlueZ).
 tpms-relearn scan
 ```
 
-Look for the entry named `VEEPEAK` (or similar) and copy its `device` value:
+You get two lists:
 
 ```json
 {
-  "device": "1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D",
-  "name": "VEEPEAK",
-  ...
+  "bluetooth_le": [
+    { "device": "1A2B3C4D-5E6F-7A8B-9C0D-1E2F3A4B5C6D", "name": "VEEPEAK", ... }
+  ],
+  "serial_ports": [
+    { "port": "COM5", "name": "Standard Serial over Bluetooth link (COM5)" }
+  ]
 }
 ```
 
-On a Mac this is a long ID like the one above. On Windows and Linux it is the adapter's Bluetooth address, like `AA:BB:CC:DD:EE:FF`. Below it is written as `DEVICE`.
+**Is your adapter under `bluetooth_le`?** Copy its `device` value. On a Mac this is a long ID like the one above; on Windows and Linux it is a Bluetooth address like `AA:BB:CC:DD:EE:FF`. In the commands below, use `--device DEVICE`.
+
+**Not there?** Your adapter probably uses classic Bluetooth (many Vgate and generic ELM327 adapters do) or USB. Those appear under `serial_ports` instead, once they are set up:
+
+- **Classic Bluetooth on Windows:** pair the adapter in Settings → Bluetooth & devices (PIN is usually `1234` or `0000`). Then open **More Bluetooth settings → COM Ports** and note the **Outgoing** port, e.g. `COM5`.
+- **Classic Bluetooth on macOS:** pair it in System Settings → Bluetooth. A port like `/dev/cu.OBDII` should appear in `serial_ports`. If none appears, your macOS doesn't offer this adapter as a serial port; use Windows or Linux instead.
+- **Classic Bluetooth on Linux:** pair it, then run `sudo rfcomm bind 0 AA:BB:CC:DD:EE:FF` and use `/dev/rfcomm0`.
+- **USB cable:** plug it in. It shows up as `COM3`, `/dev/cu.usbserial-…`, or `/dev/ttyUSB0`.
+
+In the commands below, use `--port PORT` instead of `--device DEVICE`, for example `tpms-relearn read --port COM5 --protocol can`.
 
 > [!NOTE]
 > On Windows, the `\` at the end of the long commands below doesn't work. Put each command on a single line instead.
@@ -166,6 +178,8 @@ To undo a change, run `write` again with your old IDs from the backup file.
 |---|---|---|---|---|---|
 | Toyota C-HR 2023 (1st gen, EU) | Veepeak OBDCheck BLE (ELM327 v1.5) | macOS | `can` | ✅ | ✅ |
 
+Classic Bluetooth and USB adapters (`--port`) are supported but haven't been used with a real car yet.
+
 Windows and Linux pass the automated tests but haven't been used with a real car yet. If you run it on a Windows PC, please report how it went.
 
 Toyota uses the same TPMS address (`750`/`2A`) across many models, so other Toyotas, and likely Lexus, should work with one of the two supported protocols:
@@ -179,7 +193,9 @@ Run `tpms-relearn probe` first. It only reads, and tells you which protocol your
 
 | Problem | What to do |
 |---|---|
+| Adapter missing from `scan` | Classic Bluetooth adapters never appear under `bluetooth_le`. Pair the adapter and use its serial port with `--port` (see [step 1](#1-find-your-adapter)). |
 | `Adapter not found` | Ignition on? Another app (or your phone) connected to the adapter? Turn your phone's Bluetooth off. Unplug the adapter for 10 seconds. |
+| `could not open port` | Check the port name with `scan`. On Windows, use the **Outgoing** COM port. Close other OBD apps that may hold the port. |
 | `the adapter stopped responding` | The adapter fell asleep. Unplug it for 10 seconds, plug it back in, and try again. |
 | `Neither TPMS profile returned a complete ID set` | Your car may use a protocol this tool doesn't support yet. Please open a compatibility report with the log file from `sessions/`. |
 | `Current IDs differ from --expect` | Run `read` again and copy the IDs exactly, in the same order. |
@@ -195,7 +211,7 @@ Run `tpms-relearn probe` first. It only reads, and tells you which protocol your
 
 ## How it works
 
-The adapter is driven as a raw CAN interface. The TPMS unit sits at CAN ID `750` with extended address `2A`. See [docs/protocol.md](docs/protocol.md) for the request bytes and adapter details.
+The adapter is driven as a raw CAN interface, over Bluetooth LE or a serial port. The TPMS unit sits at CAN ID `750` with extended address `2A`. See [docs/protocol.md](docs/protocol.md) for the request bytes and adapter details.
 
 ## Contributing
 

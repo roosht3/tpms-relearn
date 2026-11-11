@@ -9,7 +9,7 @@ description = "Read and register Toyota TPMS sensor IDs through a Bluetooth ELM3
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
-dependencies = ["bleak>=1.0,<4"]
+dependencies = ["bleak>=1.0,<4", "pyserial>=3.5,<4"]
 keywords = ["toyota", "lexus", "tpms", "relearn", "obd", "elm327", "ble"]
 classifiers = [
     "Development Status :: 3 - Alpha",

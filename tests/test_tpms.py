@@ -1,5 +1,6 @@
 import asyncio
 import json
+import queue
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 from tpms_relearn.protocol import (NegativeResponse, ProtocolError, frames, parse_frames,
                                positive, reassemble, sensor_id, validate_ids, write_payload)
 from tpms_relearn.service import read_ids, register, save_backup
-from tpms_relearn.transport import Elm, ToyotaLink
+from tpms_relearn.transport import ToyotaLink, ble_elm, serial_elm
 
 OLD = ["01234567", "02345678", "03456789", "0456789A"]
 NEW = ["01111111", "02222222", "03333333", "04444444"]
@@ -190,10 +191,6 @@ class LinkTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(elm.commands), 1)
 
     async def test_ble_fragmentation_and_timeout(self):
-        class Logger:
-            def record(self, **kwargs):
-                pass
-
         class Characteristic:
             properties = ["write"]
 
@@ -205,18 +202,51 @@ class LinkTests(unittest.IsolatedAsyncioTestCase):
                 self.callback(None, b"ATI\rELM")
                 self.callback(None, b"327\r>")
 
-        elm = Elm(Client(), Characteristic(), None, Logger())
-        await elm.start()
+        client = Client()
+        elm = await ble_elm(client, Characteristic(), None, Logger())
         self.assertEqual(await elm.command("ATI"), "ELM327")
 
         async def no_reply(*args, **kwargs):
             pass
 
-        elm.client.write_gatt_char = no_reply
+        client.write_gatt_char = no_reply
         with self.assertRaises(TimeoutError):
             await elm.command("ATI", timeout=0.01)
         with self.assertRaisesRegex(ProtocolError, "desynchronized"):
             await elm.command("ATI")
+
+    async def test_serial_round_trip_and_close(self):
+        class FakeSerial:
+            in_waiting = 0
+
+            def __init__(self):
+                self.written, self.pending, self.closed = [], queue.Queue(), False
+
+            def write(self, data):
+                self.written.append(data)
+                # Classic adapters often split replies; deliver in two chunks.
+                self.pending.put(b"ATZ\r\rELM327 ")
+                self.pending.put(b"v1.5\r\r>")
+
+            def read(self, size):
+                try:
+                    return self.pending.get(timeout=0.02)
+                except queue.Empty:
+                    return b""
+
+            def close(self):
+                self.closed = True
+
+        port = FakeSerial()
+        async with serial_elm(port, Logger()) as elm:
+            self.assertEqual(await elm.command("ATZ", timeout=2), "ELM327 v1.5")
+        self.assertEqual(port.written, [b"ATZ\r"])
+        self.assertTrue(port.closed)
+
+
+class Logger:
+    def record(self, **kwargs):
+        pass
 
 
 if __name__ == "__main__":
